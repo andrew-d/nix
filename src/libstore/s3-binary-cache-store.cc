@@ -95,11 +95,11 @@ S3Helper::S3Helper(const std::string & profile, const std::string & region)
             *config,
             // FIXME: https://github.com/aws/aws-sdk-cpp/issues/759
 #if AWS_VERSION_MAJOR == 1 && AWS_VERSION_MINOR < 3
-            false,
+            false
 #else
-            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never
 #endif
-            false))
+            ))
 {
 }
 
@@ -224,6 +224,27 @@ struct S3BinaryCacheStoreImpl : public S3BinaryCacheStore
                         Aws::S3::Model::CreateBucketRequest()
                         .WithBucket(bucketName)
                         .WithCreateBucketConfiguration(bucketConfig)));
+
+                // Wait for the bucket to be created, up to a maximum of 1 minute
+                bool success = false;
+                for (int attempts = 0; attempts <= 120; attempts++) {
+                    auto res = s3Helper.client->GetBucketLocation(
+                            Aws::S3::Model::GetBucketLocationRequest().WithBucket(bucketName));
+
+                    if (res.IsSuccess()) {
+                        success = true;
+                        break;
+                    }
+
+                    // Sleep a bit before trying again.
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(500));
+                }
+
+                // If we didn't successfully create the bucket, throw an error to indicate this.
+                if (!success) {
+                    throw Error(format("error creating bucket '%s': bucket creation timed out") % bucketName);
+                }
             }
 
             BinaryCacheStore::init();
